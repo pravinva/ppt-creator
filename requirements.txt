@@ -1,0 +1,8 @@
+dash==2.18.1
+dash-bootstrap-components==1.6.0
+python-pptx==0.6.23
+databricks-sdk==0.37.0
+requests==2.32.3
+Pillow==10.4.0
+matplotlib==3.9.2
+anthropic==0.39.0
