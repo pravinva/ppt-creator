@@ -6,26 +6,83 @@ from pptx import Presentation
 from pptx.util import Inches, Pt
 from pptx.enum.text import PP_ALIGN, MSO_ANCHOR
 from pptx.dml.color import RGBColor
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional, Tuple
 from diagram_generator import DiagramGenerator
 import io
 
 
 class PPTGenerator:
-    """Generate PowerPoint presentations with Databricks branding"""
+    """Generate PowerPoint presentations with custom or Databricks branding"""
 
-    # Databricks brand colors
+    # Default Databricks brand colors
     DATABRICKS_RED = RGBColor(255, 54, 33)
     DATABRICKS_DARK = RGBColor(27, 49, 57)
     DATABRICKS_WHITE = RGBColor(255, 255, 255)
     DATABRICKS_GRAY = RGBColor(102, 102, 102)
 
-    def __init__(self):
-        """Initialize PowerPoint generator"""
+    def __init__(self, custom_branding: Optional[Dict[str, Any]] = None):
+        """
+        Initialize PowerPoint generator
+
+        Args:
+            custom_branding: Optional custom branding profile from PDF analysis
+                           Contains: primary_color, secondary_color, accent_color,
+                           text_color, fonts, font_sizes
+        """
         self.prs = Presentation()
         self.prs.slide_width = Inches(10)
         self.prs.slide_height = Inches(7.5)
+
+        # Set branding (custom or default Databricks)
+        if custom_branding:
+            self._apply_custom_branding(custom_branding)
+        else:
+            self._apply_default_branding()
+
         self.diagram_gen = DiagramGenerator()
+
+    def _apply_default_branding(self):
+        """Apply default Databricks branding"""
+        self.primary_color = self.DATABRICKS_RED
+        self.secondary_color = self.DATABRICKS_DARK
+        self.accent_color = RGBColor(0, 164, 228)
+        self.text_color = self.DATABRICKS_DARK
+        self.bg_color = self.DATABRICKS_WHITE
+
+        self.title_size = Pt(54)
+        self.heading_size = Pt(36)
+        self.body_size = Pt(20)
+        self.subtitle_size = Pt(28)
+
+        self.fonts = ['Arial', 'Helvetica']
+
+    def _apply_custom_branding(self, branding: Dict[str, Any]):
+        """Apply custom branding from PDF analysis"""
+        # Colors
+        primary = branding.get('primary_color', (255, 54, 33))
+        self.primary_color = RGBColor(*primary)
+
+        secondary = branding.get('secondary_color', (27, 49, 57))
+        self.secondary_color = RGBColor(*secondary)
+
+        accent = branding.get('accent_color', (0, 164, 228))
+        self.accent_color = RGBColor(*accent)
+
+        text = branding.get('text_color', (27, 49, 57))
+        self.text_color = RGBColor(*text)
+
+        bg = branding.get('background_color', (255, 255, 255))
+        self.bg_color = RGBColor(*bg)
+
+        # Font sizes
+        font_sizes = branding.get('font_sizes', {})
+        self.title_size = Pt(font_sizes.get('title', 54))
+        self.heading_size = Pt(font_sizes.get('heading', 36))
+        self.body_size = Pt(font_sizes.get('body', 20))
+        self.subtitle_size = Pt(font_sizes.get('heading', 28))
+
+        # Fonts
+        self.fonts = branding.get('fonts', ['Arial', 'Helvetica'])
 
     def create_presentation(self, content: Dict[str, Any]) -> Presentation:
         """
@@ -52,11 +109,11 @@ class PPTGenerator:
         return self.prs
 
     def _add_title_slide(self, title: str):
-        """Add title slide with Databricks branding"""
+        """Add title slide with custom or Databricks branding"""
         slide_layout = self.prs.slide_layouts[6]  # Blank layout
         slide = self.prs.slides.add_slide(slide_layout)
 
-        # Add Databricks-style background
+        # Add background
         background = slide.shapes.add_shape(
             1,  # Rectangle
             0, 0,
@@ -64,10 +121,10 @@ class PPTGenerator:
             self.prs.slide_height
         )
         background.fill.solid()
-        background.fill.fore_color.rgb = self.DATABRICKS_WHITE
-        background.line.color.rgb = self.DATABRICKS_WHITE
+        background.fill.fore_color.rgb = self.bg_color
+        background.line.color.rgb = self.bg_color
 
-        # Add red accent bar at top
+        # Add accent bar at top (using primary color)
         accent = slide.shapes.add_shape(
             1,  # Rectangle
             0, 0,
@@ -75,8 +132,8 @@ class PPTGenerator:
             Inches(0.3)
         )
         accent.fill.solid()
-        accent.fill.fore_color.rgb = self.DATABRICKS_RED
-        accent.line.color.rgb = self.DATABRICKS_RED
+        accent.fill.fore_color.rgb = self.primary_color
+        accent.line.color.rgb = self.primary_color
 
         # Add title
         title_box = slide.shapes.add_textbox(
@@ -91,9 +148,11 @@ class PPTGenerator:
 
         # Format title
         title_para = title_frame.paragraphs[0]
-        title_para.font.size = Pt(54)
+        title_para.font.size = self.title_size
         title_para.font.bold = True
-        title_para.font.color.rgb = self.DATABRICKS_DARK
+        title_para.font.color.rgb = self.text_color
+        if self.fonts:
+            title_para.font.name = self.fonts[0]
 
         # Add subtitle
         subtitle_box = slide.shapes.add_textbox(
@@ -106,8 +165,10 @@ class PPTGenerator:
         subtitle_frame.text = "Solutions Architecture"
         subtitle_frame.paragraphs[0].alignment = PP_ALIGN.CENTER
         subtitle_para = subtitle_frame.paragraphs[0]
-        subtitle_para.font.size = Pt(28)
-        subtitle_para.font.color.rgb = self.DATABRICKS_GRAY
+        subtitle_para.font.size = self.subtitle_size
+        subtitle_para.font.color.rgb = self.secondary_color
+        if self.fonts:
+            subtitle_para.font.name = self.fonts[0]
 
     def _add_content_slide(
         self,
@@ -128,10 +189,10 @@ class PPTGenerator:
             self.prs.slide_height
         )
         background.fill.solid()
-        background.fill.fore_color.rgb = self.DATABRICKS_WHITE
-        background.line.color.rgb = self.DATABRICKS_WHITE
+        background.fill.fore_color.rgb = self.bg_color
+        background.line.color.rgb = self.bg_color
 
-        # Add red accent bar at top
+        # Add accent bar at top (using primary color)
         accent = slide.shapes.add_shape(
             1,  # Rectangle
             0, 0,
@@ -139,8 +200,8 @@ class PPTGenerator:
             Inches(0.15)
         )
         accent.fill.solid()
-        accent.fill.fore_color.rgb = self.DATABRICKS_RED
-        accent.line.color.rgb = self.DATABRICKS_RED
+        accent.fill.fore_color.rgb = self.primary_color
+        accent.line.color.rgb = self.primary_color
 
         # Add title
         title_box = slide.shapes.add_textbox(
@@ -152,9 +213,11 @@ class PPTGenerator:
         title_frame = title_box.text_frame
         title_frame.text = title
         title_para = title_frame.paragraphs[0]
-        title_para.font.size = Pt(36)
+        title_para.font.size = self.heading_size
         title_para.font.bold = True
-        title_para.font.color.rgb = self.DATABRICKS_DARK
+        title_para.font.color.rgb = self.text_color
+        if self.fonts:
+            title_para.font.name = self.fonts[0]
 
         # Determine layout based on diagram
         if diagram_type and diagram_type != 'none':
@@ -179,8 +242,10 @@ class PPTGenerator:
 
             p.text = item
             p.level = 0
-            p.font.size = Pt(20)
-            p.font.color.rgb = self.DATABRICKS_DARK
+            p.font.size = self.body_size
+            p.font.color.rgb = self.text_color
+            if self.fonts:
+                p.font.name = self.fonts[0]
             p.space_before = Pt(12)
 
     def _add_diagram(self, slide, diagram_type: str, description: str, left, top, width, height):

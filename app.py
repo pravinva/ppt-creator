@@ -8,9 +8,13 @@ import dash_bootstrap_components as dbc
 from databricks_auth import DatabricksAuth
 from claude_client import ClaudeClient
 from ppt_generator import PPTGenerator
+from pdf_branding_analyzer import BrandingExtractor
+from pdf_content_extractor import PDFContentExtractor
 import base64
 import traceback
 from datetime import datetime
+import tempfile
+import os
 
 
 # Initialize Dash app with Databricks-style theme
@@ -155,6 +159,64 @@ app.layout = html.Div([
                             className='form-control mb-3'
                         ),
 
+                        # PDF Content Upload
+                        html.Div([
+                            html.Label("Source PDF for Content (Optional)", className="form-label fw-bold"),
+                            html.Small("Upload a PDF to convert to PowerPoint (can be modified with prompts below)",
+                                      className="text-muted d-block mb-2"),
+                            dcc.Upload(
+                                id='content-pdf-upload',
+                                children=html.Div([
+                                    html.I(className="bi bi-file-pdf me-2"),
+                                    'Upload PDF Content'
+                                ]),
+                                style={
+                                    'width': '100%',
+                                    'height': '50px',
+                                    'lineHeight': '50px',
+                                    'borderWidth': '2px',
+                                    'borderStyle': 'dashed',
+                                    'borderRadius': '5px',
+                                    'borderColor': '#ccc',
+                                    'textAlign': 'center',
+                                    'marginBottom': '10px',
+                                    'cursor': 'pointer'
+                                },
+                                multiple=False,
+                                accept='.pdf'
+                            ),
+                            html.Div(id='content-pdf-status', className="mb-2"),
+                        ]),
+
+                        # PDF Branding Upload
+                        html.Div([
+                            html.Label("Branding PDF (Optional)", className="form-label fw-bold"),
+                            html.Small("Upload a sample PDF to extract branding (colors, fonts, layout)",
+                                      className="text-muted d-block mb-2"),
+                            dcc.Upload(
+                                id='branding-pdf-upload',
+                                children=html.Div([
+                                    html.I(className="bi bi-palette me-2"),
+                                    'Upload Branding Sample'
+                                ]),
+                                style={
+                                    'width': '100%',
+                                    'height': '50px',
+                                    'lineHeight': '50px',
+                                    'borderWidth': '2px',
+                                    'borderStyle': 'dashed',
+                                    'borderRadius': '5px',
+                                    'borderColor': '#ccc',
+                                    'textAlign': 'center',
+                                    'marginBottom': '10px',
+                                    'cursor': 'pointer'
+                                },
+                                multiple=False,
+                                accept='.pdf'
+                            ),
+                            html.Div(id='branding-pdf-status', className="mb-3"),
+                        ]),
+
                         # Web Research Options
                         html.Div([
                             dbc.Checklist(
@@ -238,8 +300,10 @@ app.layout = html.Div([
         ]),
     ], fluid=True),
 
-    # Store for auth credentials
+    # Stores for auth credentials, branding, and content
     dcc.Store(id='auth-store'),
+    dcc.Store(id='branding-store'),
+    dcc.Store(id='content-store'),
 ])
 
 
