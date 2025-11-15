@@ -155,11 +155,33 @@ app.layout = html.Div([
                             className='form-control mb-3'
                         ),
 
+                        # Web Research Options
+                        html.Div([
+                            dbc.Checklist(
+                                options=[{"label": " Enable Web Search for Topics", "value": "enabled"}],
+                                value=[],
+                                id="web-search-toggle",
+                                switch=True,
+                                className="mb-2"
+                            ),
+                            html.Small("Automatically search for information about technologies mentioned in your prompt",
+                                      className="text-muted")
+                        ], className="mb-3"),
+
+                        # URLs (optional)
+                        html.Label("Reference URLs (Optional - one per line)", className="form-label fw-bold"),
+                        dcc.Textarea(
+                            id='urls',
+                            placeholder='https://example.com/article1\nhttps://example.com/article2',
+                            className='form-control mb-3',
+                            style={'height': '80px', 'resize': 'vertical'}
+                        ),
+
                         # Prompt
                         html.Label("Presentation Topic & Requirements", className="form-label fw-bold"),
                         dcc.Textarea(
                             id='prompt',
-                            placeholder='Describe the presentation you want to create...\n\nExample: Create a presentation about real-time data processing using Databricks for a retail customer. Include medallion architecture, Delta Live Tables, and MLOps best practices.',
+                            placeholder='Describe the presentation you want to create...\n\nExample: Look up the new release for Genie MCP and ZeroBus ingestion. Create a presentation about ZeroBus for ingestion into the lakehouse and show how Genie MCP makes integration with agents easier.',
                             className='form-control mb-3',
                             style={'height': '200px', 'resize': 'vertical'}
                         ),
@@ -270,10 +292,12 @@ def check_databricks_connection(_):
     [State('num-slides', 'value'),
      State('sections', 'value'),
      State('prompt', 'value'),
+     State('web-search-toggle', 'value'),
+     State('urls', 'value'),
      State('auth-store', 'data')],
     prevent_initial_call=True
 )
-def generate_presentation(n_clicks, num_slides, sections_str, prompt, auth_data):
+def generate_presentation(n_clicks, num_slides, sections_str, prompt, web_search_toggle, urls_str, auth_data):
     """Generate presentation using Claude and create PowerPoint"""
     if not n_clicks:
         return dash.no_update, dash.no_update, dash.no_update
@@ -299,6 +323,14 @@ def generate_presentation(n_clicks, num_slides, sections_str, prompt, auth_data)
         if sections_str and sections_str.strip():
             sections = [s.strip() for s in sections_str.split(',') if s.strip()]
 
+        # Parse URLs
+        urls = None
+        if urls_str and urls_str.strip():
+            urls = [url.strip() for url in urls_str.split('\n') if url.strip()]
+
+        # Check if web search is enabled
+        enable_web_search = 'enabled' in (web_search_toggle or [])
+
         # Initialize Claude client
         claude_client = ClaudeClient(
             host=auth_data['host'],
@@ -314,7 +346,9 @@ def generate_presentation(n_clicks, num_slides, sections_str, prompt, auth_data)
         content = claude_client.generate_presentation_content(
             prompt=prompt,
             num_slides=num_slides,
-            sections=sections
+            sections=sections,
+            enable_web_search=enable_web_search,
+            urls=urls
         )
 
         # Create PowerPoint
