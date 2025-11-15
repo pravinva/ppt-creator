@@ -33,3 +33,9 @@ venv.bak/
 *.swp
 *.swo
 *~
+
+# Temporary diagram generation files
+modern_*_arch.png
+temp_*_arch.png
+extracted_icons/
+
