@@ -265,8 +265,9 @@ class PPTXModifier:
 
         start_idx = 1 if skip_title_slide else 0
 
-        for slide in self.prs.slides[start_idx:]:
-            slide.shapes.add_picture(logo_path, left, top, height=Inches(size))
+        for idx, slide in enumerate(self.prs.slides):
+            if idx >= start_idx:
+                slide.shapes.add_picture(logo_path, left, top, height=Inches(size))
 
     def save(self, output_path: str):
         """Save modified presentation"""

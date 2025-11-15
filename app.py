@@ -907,8 +907,8 @@ if __name__ == '__main__':
     print("Databricks Presentation Creator")
     print("="*60)
     print("\nStarting Dash application...")
-    print("Open your browser to: http://localhost:8050")
+    print("Open your browser to: http://localhost:8070")
     print("\nPress Ctrl+C to stop the server")
     print("="*60 + "\n")
 
-    app.run_server(debug=True, host='0.0.0.0', port=8050)
+    app.run(debug=True, host='0.0.0.0', port=8070)
