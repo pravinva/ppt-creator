@@ -7,6 +7,7 @@ from pptx.util import Inches, Pt
 from pptx.dml.color import RGBColor
 from typing import Dict, List, Any, Optional
 import io
+import copy
 
 
 class PPTXModifier:

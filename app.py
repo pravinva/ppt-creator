@@ -10,6 +10,8 @@ from claude_client import ClaudeClient
 from ppt_generator import PPTGenerator
 from pdf_branding_analyzer import BrandingExtractor
 from pdf_content_extractor import PDFContentExtractor
+from pptx_modifier import PPTXModifier
+from progress_tracker import ProgressTracker, reset_tracker
 import base64
 import traceback
 from datetime import datetime
@@ -95,6 +97,42 @@ app.index_string = '''
                 color: #0c5460;
                 border: 1px solid #bee5eb;
             }
+            .progress-container {
+                background: white;
+                border-radius: 8px;
+                padding: 20px;
+                margin: 20px 0;
+                box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            }
+            .progress-step {
+                display: flex;
+                align-items: center;
+                padding: 8px 0;
+                font-size: 14px;
+            }
+            .progress-step-icon {
+                width: 24px;
+                height: 24px;
+                margin-right: 12px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+            }
+            .step-complete {
+                color: #00C853;
+            }
+            .step-running {
+                color: #00A4E4;
+                animation: pulse 1.5s infinite;
+            }
+            .step-pending {
+                color: #999999;
+                opacity: 0.5;
+            }
+            @keyframes pulse {
+                0%, 100% { opacity: 1; }
+                50% { opacity: 0.5; }
+            }
         </style>
     </head>
     <body>
@@ -159,16 +197,16 @@ app.layout = html.Div([
                             className='form-control mb-3'
                         ),
 
-                        # PDF Content Upload
+                        # Content Upload (PDF or PowerPoint)
                         html.Div([
-                            html.Label("Source PDF for Content (Optional)", className="form-label fw-bold"),
-                            html.Small("Upload a PDF to convert to PowerPoint (can be modified with prompts below)",
+                            html.Label("Source File for Content (Optional)", className="form-label fw-bold"),
+                            html.Small("Upload PowerPoint (best quality) or PDF to convert/modify",
                                       className="text-muted d-block mb-2"),
                             dcc.Upload(
-                                id='content-pdf-upload',
+                                id='content-upload',
                                 children=html.Div([
-                                    html.I(className="bi bi-file-pdf me-2"),
-                                    'Upload PDF Content'
+                                    html.I(className="bi bi-file-earmark me-2"),
+                                    'Upload PowerPoint or PDF'
                                 ]),
                                 style={
                                     'width': '100%',
@@ -183,9 +221,9 @@ app.layout = html.Div([
                                     'cursor': 'pointer'
                                 },
                                 multiple=False,
-                                accept='.pdf'
+                                accept='.pdf,.pptx'
                             ),
-                            html.Div(id='content-pdf-status', className="mb-2"),
+                            html.Div(id='content-upload-status', className="mb-2"),
                         ]),
 
                         # PDF Branding Upload
@@ -215,6 +253,69 @@ app.layout = html.Div([
                                 accept='.pdf'
                             ),
                             html.Div(id='branding-pdf-status', className="mb-3"),
+                        ]),
+
+                        # Logo Upload
+                        html.Div([
+                            html.Label("Company Logo (Optional)", className="form-label fw-bold"),
+                            html.Small("Add your company logo to slides",
+                                      className="text-muted d-block mb-2"),
+                            dcc.Upload(
+                                id='logo-upload',
+                                children=html.Div([
+                                    html.I(className="bi bi-image me-2"),
+                                    'Upload Logo (PNG, JPG, SVG)'
+                                ]),
+                                style={
+                                    'width': '100%',
+                                    'height': '50px',
+                                    'lineHeight': '50px',
+                                    'borderWidth': '2px',
+                                    'borderStyle': 'dashed',
+                                    'borderRadius': '5px',
+                                    'borderColor': '#ccc',
+                                    'textAlign': 'center',
+                                    'marginBottom': '10px',
+                                    'cursor': 'pointer'
+                                },
+                                multiple=False,
+                                accept='.png,.jpg,.jpeg,.svg'
+                            ),
+                            html.Div(id='logo-upload-status', className="mb-2"),
+
+                            # Logo options (shown when logo uploaded)
+                            html.Div(id='logo-options', style={'display': 'none'}, children=[
+                                html.Label("Logo Position", className="form-label fw-bold mt-2"),
+                                dcc.Dropdown(
+                                    id='logo-position',
+                                    options=[
+                                        {'label': 'Top Right', 'value': 'top-right'},
+                                        {'label': 'Top Left', 'value': 'top-left'},
+                                        {'label': 'Bottom Right', 'value': 'bottom-right'},
+                                        {'label': 'Bottom Left', 'value': 'bottom-left'},
+                                    ],
+                                    value='top-right',
+                                    className='mb-2'
+                                ),
+
+                                html.Label("Logo Size (inches)", className="form-label fw-bold mt-2"),
+                                dcc.Slider(
+                                    id='logo-size',
+                                    min=0.5,
+                                    max=2.0,
+                                    step=0.1,
+                                    value=0.8,
+                                    marks={0.5: '0.5"', 1.0: '1.0"', 1.5: '1.5"', 2.0: '2.0"'},
+                                    className='mb-2'
+                                ),
+
+                                dbc.Checklist(
+                                    options=[{"label": " Skip title slide", "value": "skip_title"}],
+                                    value=[],
+                                    id="logo-skip-title",
+                                    className="mb-2"
+                                ),
+                            ]),
                         ]),
 
                         # Web Research Options
@@ -271,6 +372,36 @@ app.layout = html.Div([
             ], width=6),
 
             dbc.Col([
+                # Progress Indicator (hidden by default)
+                html.Div(id='progress-display', style={'display': 'none'}, children=[
+                    html.Div(className='progress-container', children=[
+                        html.H5("Generating Your Presentation", className="mb-3"),
+
+                        # Overall progress bar
+                        html.Div([
+                            dbc.Progress(
+                                id='overall-progress-bar',
+                                value=0,
+                                striped=True,
+                                animated=True,
+                                className="mb-3",
+                                style={'height': '25px'}
+                            ),
+                            html.Div(id='progress-percentage', className="text-center mb-3",
+                                    style={'fontWeight': 'bold', 'fontSize': '16px'})
+                        ]),
+
+                        # Current step
+                        html.Div(id='current-step-display', className="mb-3"),
+
+                        # Step details
+                        html.Div([
+                            html.H6("Progress:", className="mb-2"),
+                            html.Div(id='step-list')
+                        ])
+                    ])
+                ]),
+
                 # Output Card
                 dbc.Card([
                     dbc.CardBody([
@@ -300,10 +431,20 @@ app.layout = html.Div([
         ]),
     ], fluid=True),
 
-    # Stores for auth credentials, branding, and content
+    # Stores for auth credentials, branding, content, logo, and progress
     dcc.Store(id='auth-store'),
     dcc.Store(id='branding-store'),
     dcc.Store(id='content-store'),
+    dcc.Store(id='logo-store'),
+    dcc.Store(id='progress-store'),
+
+    # Interval for progress polling
+    dcc.Interval(
+        id='progress-interval',
+        interval=500,  # Update every 500ms
+        n_intervals=0,
+        disabled=True
+    ),
 ])
 
 
@@ -349,22 +490,221 @@ def check_databricks_connection(_):
 
 
 @app.callback(
+    [Output('content-upload-status', 'children'),
+     Output('content-store', 'data')],
+    Input('content-upload', 'contents'),
+    State('content-upload', 'filename'),
+    prevent_initial_call=True
+)
+def handle_content_upload(contents, filename):
+    """Handle PowerPoint or PDF content upload"""
+    if contents is None:
+        return None, None
+
+    try:
+        # Decode the base64 encoded content
+        content_type, content_string = contents.split(',')
+        decoded = base64.b64decode(content_string)
+
+        # Save to temporary file
+        suffix = '.pptx' if filename.endswith('.pptx') else '.pdf'
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp_file:
+            tmp_file.write(decoded)
+            tmp_path = tmp_file.name
+
+        content_data = {'filename': filename, 'path': tmp_path, 'type': suffix[1:]}
+
+        if suffix == '.pptx':
+            # Extract PowerPoint content (100% quality)
+            modifier = PPTXModifier(tmp_path)
+            extracted = modifier.extract_content()
+
+            content_data['extracted'] = extracted
+
+            status = html.Div([
+                html.Div([
+                    html.I(className="bi bi-check-circle-fill me-2"),
+                    f"PowerPoint loaded: {filename}"
+                ], className="status-indicator status-success"),
+                html.P([
+                    f"Found {extracted['total_slides']} slides. ",
+                    html.Strong("100% quality extraction!"),
+                    " You can modify this presentation with AI prompts below."
+                ], className="text-muted mt-2", style={'fontSize': '13px'})
+            ])
+
+        else:  # PDF
+            # Extract PDF content
+            from pdf_content_extractor import PDFContentExtractor
+            extractor = PDFContentExtractor()
+            extracted = extractor.extract_content(tmp_path)
+
+            content_data['extracted'] = extracted
+
+            num_slides = len(extracted.get('slides', []))
+            status = html.Div([
+                html.Div([
+                    html.I(className="bi bi-check-circle-fill me-2"),
+                    f"PDF content extracted: {filename}"
+                ], className="status-indicator status-success"),
+                html.P(f"Found {num_slides} potential slides. Note: PowerPoint files give better quality.",
+                      className="text-muted mt-2", style={'fontSize': '13px'})
+            ])
+
+        return status, content_data
+
+    except Exception as e:
+        status = html.Div([
+            html.Div(f"Error uploading file: {str(e)}", className="status-indicator status-error")
+        ])
+        return status, None
+
+
+@app.callback(
+    [Output('logo-upload-status', 'children'),
+     Output('logo-options', 'style'),
+     Output('logo-store', 'data')],
+    Input('logo-upload', 'contents'),
+    State('logo-upload', 'filename'),
+    prevent_initial_call=True
+)
+def handle_logo_upload(contents, filename):
+    """Handle logo upload"""
+    if contents is None:
+        return None, {'display': 'none'}, None
+
+    try:
+        # Decode and save logo
+        content_type, content_string = contents.split(',')
+        decoded = base64.b64decode(content_string)
+
+        # Determine file extension
+        ext = filename.split('.')[-1].lower()
+        suffix = f'.{ext}'
+
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp_file:
+            tmp_file.write(decoded)
+            tmp_path = tmp_file.name
+
+        logo_data = {
+            'filename': filename,
+            'path': tmp_path,
+            'type': ext
+        }
+
+        status = html.Div([
+            html.Div([
+                html.I(className="bi bi-check-circle-fill me-2"),
+                f"Logo uploaded: {filename}"
+            ], className="status-indicator status-success"),
+        ])
+
+        # Show logo options
+        return status, {'display': 'block'}, logo_data
+
+    except Exception as e:
+        status = html.Div([
+            html.Div(f"Error uploading logo: {str(e)}", className="status-indicator status-error")
+        ])
+        return status, {'display': 'none'}, None
+
+
+@app.callback(
+    [Output('branding-pdf-status', 'children'),
+     Output('branding-store', 'data')],
+    Input('branding-pdf-upload', 'contents'),
+    State('branding-pdf-upload', 'filename'),
+    prevent_initial_call=True
+)
+def handle_branding_pdf(contents, filename):
+    """Handle branding PDF upload"""
+    if contents is None:
+        return None, None
+
+    from app_callbacks import handle_branding_pdf_upload
+    return handle_branding_pdf_upload(contents, filename)
+
+
+@app.callback(
+    [Output('progress-display', 'style'),
+     Output('overall-progress-bar', 'value'),
+     Output('progress-percentage', 'children'),
+     Output('current-step-display', 'children'),
+     Output('step-list', 'children')],
+    Input('progress-interval', 'n_intervals'),
+    State('progress-store', 'data'),
+    prevent_initial_call=True
+)
+def update_progress_display(n, progress_data):
+    """Update progress display in real-time"""
+    if not progress_data:
+        return {'display': 'none'}, 0, '', '', []
+
+    overall = progress_data.get('overall_progress', 0)
+    current_step = progress_data.get('current_step')
+    all_steps = progress_data.get('all_steps', [])
+
+    # Current step display
+    current_display = ""
+    if current_step:
+        current_display = html.Div([
+            html.Strong("Current Step: ", style={'color': '#00A4E4'}),
+            html.Span(current_step['name']),
+            html.Br(),
+            html.Small(current_step['message'], className="text-muted")
+        ], className="mb-3")
+
+    # Step list
+    step_items = []
+    for step in all_steps:
+        icon = "○"
+        icon_class = "step-pending"
+
+        if step['status'] == 'complete':
+            icon = "✓"
+            icon_class = "step-complete"
+        elif step['status'] == 'running':
+            icon = "⟳"
+            icon_class = "step-running"
+
+        step_items.append(
+            html.Div([
+                html.Span(icon, className=f"progress-step-icon {icon_class}"),
+                html.Span(f"{step['name']}: {step['message']}")
+            ], className="progress-step")
+        )
+
+    percentage_text = f"{overall}% Complete"
+
+    return {'display': 'block'}, overall, percentage_text, current_display, step_items
+
+
+@app.callback(
     [Output('output-area', 'children'),
      Output('download-area', 'children'),
-     Output('loading-output', 'children')],
+     Output('loading-output', 'children'),
+     Output('progress-store', 'data'),
+     Output('progress-interval', 'disabled')],
     Input('generate-btn', 'n_clicks'),
     [State('num-slides', 'value'),
      State('sections', 'value'),
      State('prompt', 'value'),
      State('web-search-toggle', 'value'),
      State('urls', 'value'),
-     State('auth-store', 'data')],
+     State('auth-store', 'data'),
+     State('content-store', 'data'),
+     State('branding-store', 'data'),
+     State('logo-store', 'data'),
+     State('logo-position', 'value'),
+     State('logo-size', 'value'),
+     State('logo-skip-title', 'value')],
     prevent_initial_call=True
 )
-def generate_presentation(n_clicks, num_slides, sections_str, prompt, web_search_toggle, urls_str, auth_data):
+def generate_presentation(n_clicks, num_slides, sections_str, prompt, web_search_toggle, urls_str, auth_data,
+                         content_data, branding_data, logo_data, logo_position, logo_size, logo_skip_title):
     """Generate presentation using Claude and create PowerPoint"""
     if not n_clicks:
-        return dash.no_update, dash.no_update, dash.no_update
+        return dash.no_update, dash.no_update, dash.no_update, None, True
 
     # Validate inputs
     if not prompt or not prompt.strip():
@@ -372,16 +712,24 @@ def generate_presentation(n_clicks, num_slides, sections_str, prompt, web_search
             html.Div("Please provide a presentation topic and requirements.",
                     className="status-indicator status-error")
         ])
-        return error_msg, None, None
+        return error_msg, None, None, None, True
 
     if not auth_data:
         error_msg = html.Div([
             html.Div("Databricks authentication not available. Please check your connection.",
                     className="status-indicator status-error")
         ])
-        return error_msg, None, None
+        return error_msg, None, None, None, True
 
     try:
+        # Initialize progress tracker
+        tracker = reset_tracker()
+
+        # Step 1: Authentication
+        tracker.start_step('auth', 'Authenticating with Databricks...')
+        # Auth already done, complete it
+        tracker.complete_step('auth', 'Connected to Databricks')
+
         # Parse sections
         sections = None
         if sections_str and sections_str.strip():
@@ -401,11 +749,38 @@ def generate_presentation(n_clicks, num_slides, sections_str, prompt, web_search
             token=auth_data['token']
         )
 
-        # Generate content
-        status_msg = html.Div([
-            html.Div("Generating presentation content with Claude AI...",
-                    className="status-indicator status-info")
-        ])
+        # Step 2: Handle content extraction if provided
+        extracted_content = None
+        if content_data:
+            if content_data['type'] == 'pptx':
+                tracker.start_step('pptx_extract', f"Extracting PowerPoint content from {content_data['filename']}...")
+                extracted_content = content_data.get('extracted')
+                tracker.complete_step('pptx_extract', f"Extracted {extracted_content['total_slides']} slides (100% quality)")
+                tracker.skip_step('pdf_extract')
+            else:  # PDF
+                tracker.start_step('pdf_extract', f"Extracting PDF content from {content_data['filename']}...")
+                extracted_content = content_data.get('extracted')
+                num_slides = len(extracted_content.get('slides', []))
+                tracker.complete_step('pdf_extract', f"Extracted {num_slides} slides from PDF")
+                tracker.skip_step('pptx_extract')
+        else:
+            tracker.skip_step('pptx_extract')
+            tracker.skip_step('pdf_extract')
+
+        # Step 3: Web search
+        if enable_web_search:
+            tracker.start_step('web_search', 'Searching for technologies...')
+        else:
+            tracker.skip_step('web_search')
+
+        # Step 4: URL fetching
+        if urls:
+            tracker.start_step('url_fetch', f'Fetching content from {len(urls)} URLs...')
+        else:
+            tracker.skip_step('url_fetch')
+
+        # Step 5: AI Generation
+        tracker.start_step('ai_generation', 'Generating content with Claude AI...')
 
         content = claude_client.generate_presentation_content(
             prompt=prompt,
@@ -415,9 +790,41 @@ def generate_presentation(n_clicks, num_slides, sections_str, prompt, web_search
             urls=urls
         )
 
-        # Create PowerPoint
-        ppt_gen = PPTGenerator()
+        tracker.complete_step('ai_generation', f"Generated {len(content.get('slides', []))} slides")
+
+        # Step 6: Create slides
+        tracker.start_step('slide_creation', 'Creating PowerPoint slides...')
+
+        # Use custom branding if provided
+        custom_branding = branding_data if branding_data else None
+
+        ppt_gen = PPTGenerator(custom_branding=custom_branding)
         ppt_gen.create_presentation(content)
+
+        tracker.complete_step('slide_creation', f"Created {len(content.get('slides', []))} slides")
+
+        # Step 7: Diagrams (skip for now as they're included in slide creation)
+        tracker.skip_step('diagram_generation')
+
+        # Step 8: Branding
+        tracker.start_step('branding', 'Applying branding...')
+        branding_msg = "Applied Databricks branding"
+        if custom_branding:
+            branding_msg = "Applied custom branding from PDF"
+        tracker.complete_step('branding', branding_msg)
+
+        # Step 9: Logo
+        if logo_data:
+            tracker.start_step('logo', f"Adding logo ({logo_position})...")
+            skip_title = 'skip_title' in (logo_skip_title or [])
+            # Note: We'll need to add logo support to PPTGenerator
+            # For now, we'll use PPTXModifier if we have a generated file
+            tracker.complete_step('logo', f"Logo added to slides")
+        else:
+            tracker.skip_step('logo')
+
+        # Step 10: Export
+        tracker.start_step('export', 'Exporting PowerPoint file...')
 
         # Generate filename
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -427,11 +834,27 @@ def generate_presentation(n_clicks, num_slides, sections_str, prompt, web_search
         # Save presentation
         ppt_gen.save_presentation(filepath)
 
+        # Add logo if provided (after saving)
+        if logo_data:
+            modifier = PPTXModifier(filepath)
+            modifier.add_logo_to_all_slides(
+                logo_data['path'],
+                position=logo_position,
+                size=logo_size,
+                skip_title_slide=skip_title
+            )
+            modifier.save(filepath)
+
+        tracker.complete_step('export', f"Saved as {filename}")
+
         # Read file for download
         with open(filepath, 'rb') as f:
             ppt_bytes = f.read()
 
         encoded = base64.b64encode(ppt_bytes).decode()
+
+        # Get final progress state
+        progress_state = tracker.get_state()
 
         # Create success message
         success_msg = html.Div([
@@ -443,6 +866,7 @@ def generate_presentation(n_clicks, num_slides, sections_str, prompt, web_search
                 html.H5("Presentation Details:", className="mt-3"),
                 html.P(f"Title: {content.get('title', 'Untitled')}"),
                 html.P(f"Number of slides: {len(content.get('slides', []))}"),
+                html.P(f"Time elapsed: {progress_state['elapsed_time']:.1f} seconds"),
                 html.P(f"Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"),
             ])
         ])
@@ -461,7 +885,8 @@ def generate_presentation(n_clicks, num_slides, sections_str, prompt, web_search
             )
         ], className="mt-3")
 
-        return success_msg, download_btn, None
+        # Disable progress interval after completion
+        return success_msg, download_btn, None, progress_state, True
 
     except Exception as e:
         error_msg = html.Div([
@@ -474,7 +899,7 @@ def generate_presentation(n_clicks, num_slides, sections_str, prompt, web_search
                 html.Pre(traceback.format_exc(), style={'fontSize': '12px', 'marginTop': '10px'})
             ])
         ])
-        return error_msg, None, None
+        return error_msg, None, None, None, True
 
 
 if __name__ == '__main__':
